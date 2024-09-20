@@ -8,17 +8,9 @@ _ = load_dotenv(find_dotenv())
 
 client = openai.Client()
 
-ticker = 'ABEV3'
-
-ticker_obj = yf.Ticker(f'{ticker}.SA')
-
-print('ticker_obj ', ticker_obj)
-
-ticker_obj.history()
-
-
 def retorna_cotacao_historica(ticker, periodo):
     print('recendo ', ticker, periodo)
+    ticker = ticker.replace('.SA', '')
     ticker_obj = yf.Ticker(f'{ticker}.SA')
     hist = ticker_obj.history(period= periodo, auto_adjust=True)
     if len(hist) > 30:
@@ -36,17 +28,18 @@ tools = [
         "type": "function",
         "function": {
             "name": "retorna_cotacao_historica",
-            "description": "Obtém a cotação de hoje e a cotação histórica de uma ação do mercado financeiro",
+            "description": "Retorna a cotação de hoje e ou cotação histórica de uma ação da BOVESPA",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {
                         "type": "string",
-                        "description": "O nome da ação",
+                        "description": "O ticker da ação. Exemplo: 'ABEV3' para Ambev, PETR4 para Petrobras, etc.",
                     },
                     "periodo": {
                         "type": "string", 
-                        "description": "o periodo que eu gostaria de consultar, quando o periodo for hoje ou agora, use 1d"
+                        "description": "O período que será retornado de dados hiróricos. Exemplo: '1d' para um dia, '1mo' para um mês, '1y' para um ano, etc.",
+                        'enum': ['1d', '5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max'],
                     },
                 },
                 "required": ["ticker", "periodo"],
@@ -56,9 +49,7 @@ tools = [
 ]
 
 
-def text_generate(messages):
-
-    new_messages = messages
+def text_generate(new_messages):
 
     response = client.chat.completions.create(
         model="gpt-3.5-turbo-0125",
@@ -76,10 +67,7 @@ def text_generate(messages):
             function_name = tool_call.function.name
             function_to_call = funcoes_disponiveis[function_name]
             function_args = json.loads(tool_call.function.arguments)
-            function_response = function_to_call(
-                ticker=function_args.get("ticker"),
-                periodo=function_args.get("periodo"),
-            )
+            function_response = function_to_call(**function_args)
             new_messages.append(
                 {
                     "tool_call_id": tool_call.id,
@@ -88,18 +76,21 @@ def text_generate(messages):
                     "content": function_response,
                 }
             )
-    segunda_resposta = client.chat.completions.create(
-        model="gpt-3.5-turbo-0125",
-        messages=new_messages,
-    )   
 
-    mensagem_resp = segunda_resposta.choices[0].message
-    print('Assistant: ', end='')
-    print(mensagem_resp.content)
+        segunda_resposta = client.chat.completions.create(
+            model="gpt-3.5-turbo-0125",
+            messages=new_messages,
+        )   
+        new_messages.append(segunda_resposta.choices[0].message)
+
+    print(f'Assistant: {new_messages[-1].content}', end='')
+    print()
+
     return new_messages
 
 
 if __name__ == '__main__':
+
     messages = []
 
     print('Bem-vindo ao chatbot de consulta de cotações!')
@@ -110,5 +101,4 @@ if __name__ == '__main__':
     while True:
         user_input = input('User: ')
         messages.append({'role': 'user', 'content': user_input})
-        complete_responses = text_generate(messages)
-        messages.append({'role': 'assistant', 'content': complete_responses}) # salva o contexto para poder saber do que estamos falando
+        messages = text_generate(messages.copy())
